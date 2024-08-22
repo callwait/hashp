@@ -1,0 +1,35 @@
+{
+  "name": "babel-plugin-hashp",
+  "version": "1.0.0",
+  "description": "A Babel plugin for better debugging",
+  "main": "src/babel-hashp.js",
+  "dependencies": {},
+  "devDependencies": {
+    "@babel/cli": "^7.24.8",
+    "@babel/core": "^7.25.2",
+    "@babel/preset-env": "^7.25.2",
+    "jest": "^29.7.0"
+  },
+  "peerDependencies": {
+    "@babel/core": "^7.0.0"
+  },
+  "scripts": {
+    "build": "babel src -d lib",
+    "test": "jest",
+    "prepublishOnly": "npm run build"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/callwait/hashp.git"
+  },
+  "keywords": [
+    "babel-plugin",
+    "hashp"
+  ],
+  "author": "Konstantin Mashirov",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/callwait/hashp/issues"
+  },
+  "homepage": "https://github.com/callwait/hashp#readme"
+}
