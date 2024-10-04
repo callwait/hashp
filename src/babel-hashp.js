@@ -2,14 +2,14 @@ const generate = require('@babel/generator').default;
 
 module.exports = function (babel) {
   const { types: t } = babel;
-  const DEBUG_PREFIX = '__debug_';
+  const DEBUG_PREFIX = '__hashp_';
 
   function createDebugLog(name, value) {
     return t.expressionStatement(
-      t.callExpression(
-        t.memberExpression(t.identifier("console"), t.identifier("log")),
-        [t.stringLiteral(`#p ${name.replace(DEBUG_PREFIX, '')} => `), value]
-      )
+      t.callExpression(t.memberExpression(t.identifier('console'), t.identifier('log')), [
+        t.stringLiteral(`#p ${name.replace(DEBUG_PREFIX, '')} => `),
+        value
+      ])
     );
   }
 
@@ -18,10 +18,7 @@ module.exports = function (babel) {
     return t.callExpression(
       t.arrowFunctionExpression(
         [t.identifier('value')],
-        t.blockStatement([
-          createDebugLog(name, t.identifier('value')),
-          t.returnStatement(t.identifier('value'))
-        ])
+        t.blockStatement([createDebugLog(name, t.identifier('value')), t.returnStatement(t.identifier('value'))])
       ),
       [valueNode]
     );
@@ -30,6 +27,27 @@ module.exports = function (babel) {
   function handleDebugIdentifier(path) {
     if (path.node.name && path.node.name.startsWith(DEBUG_PREFIX)) {
       const variableName = path.node.name.slice(8);
+
+      // Check if the variableName is part of function parameters
+      const functionParamPath = path.findParent(
+        (p) => t.isFunctionDeclaration(p) || t.isFunctionExpression(p) || t.isArrowFunctionExpression(p)
+      );
+
+      if (functionParamPath) {
+        const functionParams = functionParamPath.node.params;
+        const isParam = functionParams.some(
+          (param) =>
+            (t.isIdentifier(param) && param.name === variableName) ||
+            (t.isAssignmentPattern(param) && t.isIdentifier(param.left) && param.left.name === variableName) ||
+            (t.isObjectPattern(param) &&
+              param.properties.some((prop) => t.isIdentifier(prop.key) && prop.key.name === variableName))
+        );
+
+        if (isParam) {
+          return; // Ignore variable if it's part of function parameters
+        }
+      }
+
       path.node.name = variableName;
       if (!shouldSkipDebugWrapping(path)) {
         path.replaceWith(wrapWithDebug(path, variableName));
@@ -39,14 +57,22 @@ module.exports = function (babel) {
 
   function shouldSkipDebugWrapping(path) {
     const skipTypes = [
-      'ObjectProperty', 'ArrayExpression', 'FunctionDeclaration',
-      'FunctionExpression', 'ArrowFunctionExpression', 'ReturnStatement',
-      'CallExpression', 'ClassProperty', 'ObjectPattern'
+      'ObjectProperty',
+      'ArrayExpression',
+      'FunctionDeclaration',
+      'FunctionExpression',
+      'ArrowFunctionExpression',
+      'ReturnStatement',
+      'CallExpression',
+      'ClassProperty',
+      'ArrayPattern',
+      'ObjectPattern'
     ];
-    return skipTypes.some(type =>
-      path.parent.type === type &&
-      (type !== 'CallExpression' || path.parent.callee === path.node) &&
-      (type !== 'ObjectProperty' || path.parent.key === path.node)
+    return skipTypes.some(
+      (type) =>
+        path.parent.type === type &&
+        (type !== 'CallExpression' || path.parent.callee === path.node) &&
+        (type !== 'ObjectProperty' || path.parent.key === path.node)
     );
   }
 
@@ -65,11 +91,9 @@ module.exports = function (babel) {
       const debuggedProperties = [];
       const allProperties = [];
 
-      node.id.properties.forEach(prop => {
+      node.id.properties.forEach((prop) => {
         if (t.isObjectProperty(prop) && t.isIdentifier(prop.key)) {
-          const propertyName = prop.key.name.startsWith(DEBUG_PREFIX)
-            ? prop.key.name.slice(8)
-            : prop.key.name;
+          const propertyName = prop.key.name.startsWith(DEBUG_PREFIX) ? prop.key.name.slice(8) : prop.key.name;
 
           allProperties.push(propertyName);
 
@@ -86,31 +110,20 @@ module.exports = function (babel) {
         const tempObj = path.scope.generateUidIdentifier('temp');
 
         // Create the temporary object declaration
-        const tempObjDeclaration = t.variableDeclaration('const', [
-          t.variableDeclarator(tempObj, node.init)
-        ]);
+        const tempObjDeclaration = t.variableDeclaration('const', [t.variableDeclarator(tempObj, node.init)]);
 
         // Create individual variable declarations for all properties
-        const individualDeclarations = allProperties.map(prop =>
+        const individualDeclarations = allProperties.map((prop) =>
           t.variableDeclaration('const', [
-            t.variableDeclarator(
-              t.identifier(prop),
-              t.memberExpression(tempObj, t.identifier(prop))
-            )
+            t.variableDeclarator(t.identifier(prop), t.memberExpression(tempObj, t.identifier(prop)))
           ])
         );
 
         // Create debug log statements only for debugged properties
-        const debugLogs = debuggedProperties.map(prop =>
-          createDebugLog(prop, t.identifier(prop))
-        );
+        const debugLogs = debuggedProperties.map((prop) => createDebugLog(prop, t.identifier(prop)));
 
         // Replace the original destructuring with our new statements
-        path.parentPath.replaceWithMultiple([
-          tempObjDeclaration,
-          ...individualDeclarations,
-          ...debugLogs
-        ]);
+        path.parentPath.replaceWithMultiple([tempObjDeclaration, ...individualDeclarations, ...debugLogs]);
 
         // Remove the original declarator to avoid duplicate processing
         path.remove();
@@ -126,9 +139,7 @@ module.exports = function (babel) {
     }
 
     // Handle call expression
-    if (t.isCallExpression(node.init) &&
-      t.isIdentifier(node.init.callee) &&
-      node.init.callee.name === DEBUG_PREFIX) {
+    if (t.isCallExpression(node.init) && t.isIdentifier(node.init.callee) && node.init.callee.name === DEBUG_PREFIX) {
       if (node.init.arguments.length > 0) {
         const debugName = generate(node.init).code.slice(8); // Remove DEBUG_PREFIX prefix
         const debuggedInit = wrapWithDebug({ node: node.init.arguments[0] }, debugName);
@@ -149,12 +160,16 @@ module.exports = function (babel) {
   }
 
   function handleArrayExpression(path) {
-    path.node.elements = path.node.elements.map(element => {
+    path.node.elements = path.node.elements.map((element) => {
       if (t.isIdentifier(element) && element.name.startsWith(DEBUG_PREFIX)) {
         const elementName = element.name.slice(8);
         element.name = elementName;
         return wrapWithDebug({ node: element }, elementName);
-      } else if (t.isSpreadElement(element) && t.isIdentifier(element.argument) && element.argument.name.startsWith(DEBUG_PREFIX)) {
+      } else if (
+        t.isSpreadElement(element) &&
+        t.isIdentifier(element.argument) &&
+        element.argument.name.startsWith(DEBUG_PREFIX)
+      ) {
         const spreadName = element.argument.name.slice(8);
         element.argument.name = spreadName;
         return t.spreadElement(wrapWithDebug({ node: element.argument }, spreadName));
@@ -164,21 +179,27 @@ module.exports = function (babel) {
   }
 
   function handleArrowFunctionExpression(path) {
-    if (t.isCallExpression(path.node.body) &&
+    if (
+      t.isCallExpression(path.node.body) &&
       t.isIdentifier(path.node.body.callee) &&
-      path.node.body.callee.name === DEBUG_PREFIX) {
-        const argName = generate(path.node.body).code.slice(8);
-        path.node.body = wrapWithDebug({ node: path.node.body.arguments[0] }, argName);
+      path.node.body.callee.name === DEBUG_PREFIX
+    ) {
+      const argName = generate(path.node.body).code.slice(8);
+      path.node.body = wrapWithDebug({ node: path.node.body.arguments[0] }, argName);
     }
   }
 
   function handleFunction(path) {
-    path.get('params').forEach(param => {
+    path.get('params').forEach((param) => {
       if (t.isIdentifier(param.node) && param.node.name.startsWith(DEBUG_PREFIX)) {
         const paramName = param.node.name.slice(8);
         param.node.name = paramName;
         path.get('body').unshiftContainer('body', createDebugLog(paramName, t.identifier(paramName)));
-      } else if (t.isAssignmentPattern(param.node) && t.isIdentifier(param.node.left) && param.node.left.name.startsWith(DEBUG_PREFIX)) {
+      } else if (
+        t.isAssignmentPattern(param.node) &&
+        t.isIdentifier(param.node.left) &&
+        param.node.left.name.startsWith(DEBUG_PREFIX)
+      ) {
         const paramName = param.node.left.name.slice(8);
         param.node.left.name = paramName;
         path.get('body').unshiftContainer('body', createDebugLog(paramName, t.identifier(paramName)));
@@ -187,9 +208,12 @@ module.exports = function (babel) {
   }
 
   function handleReturnStatement(path) {
-    if (path.node.argument && t.isCallExpression(path.node.argument) &&
+    if (
+      path.node.argument &&
+      t.isCallExpression(path.node.argument) &&
       t.isIdentifier(path.node.argument.callee) &&
-      path.node.argument.callee.name === DEBUG_PREFIX) {
+      path.node.argument.callee.name === DEBUG_PREFIX
+    ) {
       const argName = generate(path.node.argument).code.slice(8);
       path.node.argument = wrapWithDebug({ node: path.node.argument.arguments[0] }, argName);
     }
@@ -221,6 +245,14 @@ module.exports = function (babel) {
   }
 
   function handleObjectProperty(path) {
+    if (
+      t.isFunctionDeclaration(path.parentPath.parent) ||
+      t.isFunctionExpression(path.parentPath.parent) ||
+      t.isArrowFunctionExpression(path.parentPath.parent)
+    ) {
+      return; // Ignore destructured objects in function parameters
+    }
+
     if (t.isIdentifier(path.node.key) && path.node.key.name.startsWith(DEBUG_PREFIX)) {
       const propertyName = path.node.key.name.slice(8);
       path.node.key.name = propertyName;
@@ -236,11 +268,14 @@ module.exports = function (babel) {
     }
   }
 
+  function replaceDebugPrefix(path) {
+    if (t.isIdentifier(path.node) && path.node.name.startsWith(DEBUG_PREFIX)) {
+      path.node.name = path.node.name.slice(DEBUG_PREFIX.length);
+    }
+  }
+
   return {
-    name: "debug-log-plugin",
-    manipulateOptions(opts, parserOpts) {
-      parserOpts.plugins.push("jsx", "classProperties", "typescript");
-    },
+    name: 'debug-log-plugin',
     parserOverride(code, opts, parse) {
       const transformedCode = code.replace(/#p\s+/g, DEBUG_PREFIX);
       return parse(transformedCode, opts);
@@ -260,6 +295,9 @@ module.exports = function (babel) {
           ClassProperty: handleClassProperty,
           TSParameterProperty: handleTSParameterProperty,
           TSPropertySignature: handleTSPropertySignature
+        });
+        path.traverse({
+          Identifier: replaceDebugPrefix
         });
       }
     }
